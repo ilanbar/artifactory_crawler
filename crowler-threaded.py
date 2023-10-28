@@ -11,19 +11,11 @@ import ssl
 import re
 import os
 
-# "https://ubit-artifactory-or.intel.com/artifactory/server-bios-staging-local"
-# verbose = True
 disable_cache = False
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 global crowler
-
-def sync(_file):
-    # save results
-    _file.seek(0)  # rewind
-    json.dump(crowler, _file, indent=4)
-    _file.truncate()
 
 def flatten( list_of_items, out_list ):
     for item in list_of_items:
@@ -32,7 +24,7 @@ def flatten( list_of_items, out_list ):
         else:
             out_list.append(item)
 
-def Unpack(crowler_access, file_path, dir_path, file, file_type, filter, dir_paths):
+def Unpack(crowler_access, file_path, dir_path, file, file_type, filter):
     print(f"[info] Downloading [{file_path}] ...")
     local_filename, _ = request.urlretrieve(file_path)
     print(f"[Info] Local file is [{local_filename}]")
@@ -92,8 +84,7 @@ def worker(item, crowler_access, url_path, dirs, dir_path):
           print("[Info] File already inside the crowler")
           print(f"[Info] Checking timestamp")
           if crowler_access[file]["last-modified"] != last_modified:
-              print(
-                  f"[Info] file [{file}] time-stamp changed, re-parsing..")
+              print(f"[Info] file [{file}] time-stamp changed, re-parsing..")
               Unpack(crowler_access[file], file_path, dir_path, file, file_type, filter)
               crowler_access[file]["last-modified"] = last_modified
 
@@ -116,21 +107,23 @@ def run(url, filter, _file, *dirs):
     result = urllib.request.urlopen(url_path, context=ctx)
     soup = BeautifulSoup(result, "lxml")
     href_items = soup.find_all('a', href=True)
-    pool = ThreadPoolExecutor(max_workers=len(href_items))
+    pool = ThreadPoolExecutor(max_workers=4) # len(href_items)
     workers = []
-    for item in soup.find_all('a', href=True):
+    for item in href_items:
         if item.text:
           workers.append(pool.submit(worker, item, crowler_access, url_path, dirs, dir_path))
 
     pool.shutdown(wait=True,cancel_futures=False)
     for worker_task in workers:
-        print(worker_task.result)
-    sync(_file)
+        if worker_task._exception != None:
+            print(f"state {worker_task._state} / exception {worker_task._exception}")
 
 _file = open("crowler.json", "r+")
 crowler=json.load(_file)
-for url, db in crowler.items():
-    run(url, db["file_info_filter"], _file)
-_file.close()
-
-#        file_path = urljoin(f"{url}/", file)
+with open("crowler.json", "r+") as _file:
+    for url, db in crowler.items():
+        pass
+        run(url, db["file_info_filter"], _file)
+    _file.seek(0)
+    json.dump(crowler, _file, indent=4)
+    _file.truncate()
