@@ -4,7 +4,7 @@ from urllib.parse import urljoin
 from urllib import request
 import pathlib
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 import json # ijson will be used for large files
 from retry import retry
 import ssl
@@ -56,7 +56,7 @@ def Unpack(crowler_access, file_path, dir_path, file, file_type, filter, dir_pat
     print(f"[info] Removing file]")
     os.remove(local_filename)
 
-def worker(item, crowler_access, url_path, dirs, dir_path, file_type):
+def worker(item, crowler_access, url_path, dirs, dir_path):
   if item.text.endswith("/"):
       dir = item.text[:-1]
       if dir != "..":
@@ -67,21 +67,19 @@ def worker(item, crowler_access, url_path, dirs, dir_path, file_type):
                   "path": url_path,
                   "type": "dir"
               }
-              sync(_file)
           run(url, filter, _file, list(dirs)+[dir])
   else:
       file = item.text
       file_path = urljoin(f"{url_path}/", file)
+      file_extension = pathlib.Path(file).suffix
+      file_type = "std"
+      if any(ext in file for ext in (".zip", ".7z")):
+          file_type = file_extension
       print(f"[Info] Found file [{file}]")
       conn = urllib.request.urlopen(file_path, timeout=30)
       last_modified = conn.headers['last-modified']
       if disable_cache or (file not in crowler_access):
           print(f"[Info] Adding [{file}] to crowler")
-          file_extension = pathlib.Path(file).suffix
-          file_type = "std"
-          if any(ext in file for ext in (".zip", ".7z")):
-              file_type = file_extension
-
           crowler_access[file] = {
               "path": file_path,
               "type": "file",
@@ -98,8 +96,6 @@ def worker(item, crowler_access, url_path, dirs, dir_path, file_type):
                   f"[Info] file [{file}] time-stamp changed, re-parsing..")
               Unpack(crowler_access[file], file_path, dir_path, file, file_type, filter)
               crowler_access[file]["last-modified"] = last_modified
-
-      sync(_file)
 
 def run(url, filter, _file, *dirs):
     global q
@@ -119,13 +115,17 @@ def run(url, filter, _file, *dirs):
     crowler_access = eval(f"crowler['{url}']{crowler_access_path}")
     result = urllib.request.urlopen(url_path, context=ctx)
     soup = BeautifulSoup(result, "lxml")
-
     href_items = soup.find_all('a', href=True)
-    pool = ThreadPoolExecutor(len(href_items))
+    pool = ThreadPoolExecutor(max_workers=len(href_items))
+    workers = []
     for item in soup.find_all('a', href=True):
         if item.text:
-          pool.submit(worker, item, crowler_access, url_path, dirs, dir_path)
-    pool.shutdown()
+          workers.append(pool.submit(worker, item, crowler_access, url_path, dirs, dir_path))
+
+    pool.shutdown(wait=True,cancel_futures=False)
+    for worker_task in workers:
+        print(worker_task.result)
+    sync(_file)
 
 _file = open("crowler.json", "r+")
 crowler=json.load(_file)
