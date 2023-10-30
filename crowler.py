@@ -126,5 +126,3 @@ crowler=json.load(_file)
 for url, db in crowler.items():
     run(url, db["file_info_filter"], _file)
 _file.close()
-
-#        file_path = urljoin(f"{url}/", file)

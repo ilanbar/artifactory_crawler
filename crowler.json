@@ -1,5 +1,5 @@
 {
-    "https://ubit-artifactory-or.intel.com/artifactory/client-bios-or-local": {
+    "https://ubit-artifactory-or.intel.com/artifactory/client-bios-or-local/Daily/LunarLake/lunarlake_family": {
         "file_info_filter": [
             ".bin",
             ".efi",
