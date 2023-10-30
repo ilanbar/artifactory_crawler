@@ -20,12 +20,12 @@ disable_cache = False
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
-global crowler
+global crawler
 
 def sync(_file):
     # save results
     _file.seek(0)  # rewind
-    json.dump(crowler, _file, indent=4)
+    json.dump(crawler, _file, indent=4)
     _file.truncate()
 
 def flatten( list_of_items, out_list ):
@@ -35,7 +35,7 @@ def flatten( list_of_items, out_list ):
         else:
             out_list.append(item)
 
-def Unpack(crowler_access, file_path, dir_path, file, file_type, filter):
+def Unpack(crawler_access, file_path, dir_path, file, file_type, filter):
     print(f"[info] Downloading [{file_path}] ...")
     local_filename, _ = request.urlretrieve(file_path)
     print(f"[Info] Local file is [{local_filename}]")
@@ -50,7 +50,7 @@ def Unpack(crowler_access, file_path, dir_path, file, file_type, filter):
         if os.path.getsize(file_log) == 0:
             os.remove(file_log)
         else:
-            crowler_access["log-path"] = file_log
+            crawler_access["log-path"] = file_log
 
     else:
         outfile = os.path.join(dir_path, file)+".stat"
@@ -66,14 +66,14 @@ def run(url, filter, _file, *dirs):
     if dirs != ():
         flatten(dirs, _dirs)
     url_path = url
-    crowler_access_path = ""
+    crawler_access_path = ""
     for dir in _dirs:
-        crowler_access_path += f"['{dir}']"
+        crawler_access_path += f"['{dir}']"
         url_path += f"/{dir}"
         dir_path += f"/{dir}"
     print(f"{url_path}]")
     pathlib.Path(dir_path).mkdir(parents=True, exist_ok=True)
-    crowler_access = eval(f"crowler['{url}']{crowler_access_path}")
+    crawler_access = eval(f"crawler['{url}']{crawler_access_path}")
     result = urllib.request.urlopen(url_path, context=ctx)
     soup = BeautifulSoup(result, "lxml")
     for item in soup.find_all('a', href=True):
@@ -82,9 +82,9 @@ def run(url, filter, _file, *dirs):
                 dir = item.text[:-1]
                 if dir != "..":
                     print(f"[Info] Found dir [{dir}]")
-                    if disable_cache or (dir not in crowler_access):
-                        print(f"[Info] Adding [{dir}] to crowler")
-                        crowler_access[dir] = {
+                    if disable_cache or (dir not in crawler_access):
+                        print(f"[Info] Adding [{dir}] to crawler")
+                        crawler_access[dir] = {
                             "path": url_path,
                             "type": "dir"
                         }
@@ -96,33 +96,33 @@ def run(url, filter, _file, *dirs):
                 print(f"[Info] Found file [{file}]")
                 conn = urllib.request.urlopen(file_path, timeout=30)
                 last_modified = conn.headers['last-modified']
-                if disable_cache or (file not in crowler_access):
-                    print(f"[Info] Adding [{file}] to crowler")
+                if disable_cache or (file not in crawler_access):
+                    print(f"[Info] Adding [{file}] to crawler")
                     file_extension = pathlib.Path(file).suffix
                     file_type = "std"
                     if any(ext in file for ext in (".zip", ".7z")):
                         file_type = file_extension
 
-                    crowler_access[file] = {
+                    crawler_access[file] = {
                         "path": file_path,
                         "type": "file",
                         "file-type": file_type,
                         "last-modified": last_modified
                     }
 
-                    Unpack(crowler_access[file], file_path, dir_path, file, file_type, filter)
+                    Unpack(crawler_access[file], file_path, dir_path, file, file_type, filter)
                 else:
-                    print("[Info] File already inside the crowler")
+                    print("[Info] File already inside the crawler")
                     print(f"[Info] Checking timestamp")
-                    if crowler_access[file]["last-modified"] != last_modified:
+                    if crawler_access[file]["last-modified"] != last_modified:
                         print(f"[Info] file [{file}] time-stamp changed, re-parsing..")
-                        Unpack(crowler_access[file], file_path, dir_path, file, file_type, filter)
-                        crowler_access[file]["last-modified"] = last_modified
+                        Unpack(crawler_access[file], file_path, dir_path, file, file_type, filter)
+                        crawler_access[file]["last-modified"] = last_modified
 
                 sync(_file)
 
-_file = open("crowler.json", "r+")
-crowler=json.load(_file)
-for url, db in crowler.items():
+_file = open("crawler.json", "r+")
+crawler=json.load(_file)
+for url, db in crawler.items():
     run(url, db["file_info_filter"], _file)
 _file.close()
