@@ -1,155 +1,152 @@
-import bdb
-from typing import final
-from bs4 import BeautifulSoup
-from six.moves import urllib
-from urllib.parse import urljoin
-from urllib import request
-import pathlib
-import subprocess
-from concurrent.futures import ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from threading import current_thread
-import json # ijson will be used for large files
+from urllib.parse import urljoin, urlsplit
+from six.moves import urllib
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor, wait
 import ssl
-import re
-import os
-import sys
-import pdb, traceback
 import time
+from datetime import datetime
+import os
 
-disable_cache = False
-ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE
-global crawler
+date_format = "%d-%b-%Y %H:%M"
 
-def flatten( list_of_items, out_list ):
-    for item in list_of_items:
-        if type(item) is list:
-            flatten(item, out_list)
-        else:
-            out_list.append(item)
+@dataclass
+class Runner:
+    artifactory_url: str
+    directory_name_filter: list
+    file_extentions_filter: list
+    datetime_filter: str
+    output_json_file: str = None
+    disable_cache : bool = False
+    debug_prints : bool = True
+    multi_threaded: bool = True
 
-def Unpack(crawler_access, file_path, dir_path, file, file_type, filter):
-    print(f"[Info][{current_thread().name}] Downloading [{file_path}] ...")
-    local_filename, _ = request.urlretrieve(file_path)
-    print(f"[Info][{current_thread().name}] Local file is [{local_filename}]")
-    if file_type != "std":
-        result  = subprocess.run(["7z", "l", local_filename], capture_output=True,  text=True)
-        print(f"[Info][{current_thread().name}] Decompressing {os.path.join(dir_path, file)}]")
-        file_log = os.path.join(dir_path, file)+".log"
-        with open(file_log, "w") as f:
-            for line in result.stdout.split("\n"):
-                for ext in filter:
-                    if line.endswith(ext):
-                        f.write(f"{line}\n")
-        if os.path.getsize(file_log) == 0:
-            os.remove(file_log)
-        else:
-            crawler_access["log-path"] = file_log
-    else:
-        outfile = os.path.join(dir_path, file)+".stat"
-        with open(outfile, "w") as f:
-            f.write(str(os.stat(local_filename)))
-    print(f"[info][{current_thread().name}] Removing file]")
-    os.remove(local_filename)
+    def __post_init__(self) -> None:
+      # Create the output dictionary
+      self.crawler = dict()
 
-def worker(item, crawler_access, url_path, dirs, dir_path, filter):
-  if item.text.endswith("/"):
-      dir = item.text[:-1]
-      if dir != "..":
-          print(f"[Info][{current_thread().name}] Found dir [{dir}]")
-          if disable_cache or (dir not in crawler_access):
-              print(f"[Info] Adding [{dir}][{current_thread().name}] to crawler")
-              crawler_access[dir] = {
-                  "path": url_path,
-                  "type": "dir"
-              }
-          run(url, filter, _file, list(dirs)+[dir])
-  else:
-      file = item.text
-      file_path = urljoin(f"{url_path}/", file)
-      file_extension = pathlib.Path(file).suffix
-      file_type = "std"
-      if file_extension in [".zip", ".7z"]:
-          file_type = file_extension
-      print(f"[Info][{current_thread().name}] Found file [{file}]")
+      # Create SSL context
+      self.ctx = ssl.create_default_context()
+      self.ctx.check_hostname = False
+      self.ctx.verify_mode = ssl.CERT_NONE
+
+      # fix (add '/' suffix) to the artifactory_url if needed
+      if not self.artifactory_url.endswith('/'):
+        self.artifactory_url+="/"
+      # Create empty dict entry for the artifactory_url string
+      self.crawler[self.artifactory_url] = dict()
+
+    '''
+    The method does recursive scan of artifactoery files and folders
+    The The folder_path contains the list of folders after the artifactory_url
+    '''
+    def start(self, url_path=None, folder_path=list()):
+      # First time this function is called we set url_path to artifactory_url
+      # The folder_path contains the list of folders after the artifactory_url
+      if url_path == None:
+        url_path = self.artifactory_url
+        folder_path = [urlsplit(url_path).path.split("/")[-2]]
+
+      if self.multi_threaded:
+        workers = list()
+
+      if self.debug_prints:
+        print(f"[Info][{current_thread().name}] Scanning url {url_path}")
+
+      # Create direct access into the crawler dictionary
       while True:
-        try:
-            conn = urllib.request.urlopen(file_path, timeout=120)
-        except:
-            print(f"[Warning][{current_thread().name}] Failed to open {url_path}, Retrying...")
-            # extype, value, tb = sys.exc_info()
-            # traceback.print_exc()
-            # pdb.post_mortem(tb)
-            time.sleep(60)
-        else:
-            break
-      last_modified = conn.headers['last-modified']
-      if disable_cache or (file not in crawler_access):
-          print(f"[Info][{current_thread().name}] Adding [{file}] to crawler")
-          crawler_access[file] = {
-              "path": file_path,
-              "type": "file",
-              "file-type": file_type,
-              "last-modified": last_modified
-          }
+          try:
+              result = urllib.request.urlopen(url_path, context=self.ctx)
+          except:
+              print(f"[Warning][{current_thread().name}] Failed to open {url_path}, Retrying...")
+              time.sleep(60)
+          else:
+              break
 
-          Unpack(crawler_access[file], file_path, dir_path, file, file_type, filter)
+      # href_items = set([directory.text for directory in href_items]) & set(self.directory_name_filter)
+      # datetime_object = datetime.strptime(date_string, date_format)
+
+      if url_path.endswith('/'):
+        # Extract list of HREF items
+        soup = BeautifulSoup(result, "lxml")
+        href_items = soup.find_all('a', href=True)
+        # Create ThreadPoolExecutor for all HREF items
+        if self.multi_threaded:
+          pool = ThreadPoolExecutor(max_workers=len(href_items))
+        for href_item in href_items:
+            href_string = href_item.attrs['href']
+            if href_string and href_string != "../": # with skip parent folder ..
+              if href_string.endswith('/'):
+                folder_path.append(href_string)
+                if self.debug_prints:
+                  print(f"[Info][{current_thread().name}] Adding [{href_string}][{current_thread().name}] to crawler")
+                temp_url_path = urljoin(f"{url_path}/", href_string)
+                if self.multi_threaded:
+                    workers.append(pool.submit(self.start, temp_url_path, folder_path))
+                else:
+                    self.start(temp_url_path, folder_path)
+              else:
+                  if self.debug_prints:
+                    print(f"[Info][{current_thread().name}] Found file [{href_string}]")
+
+      # Wait for all threads to complete
+      if self.multi_threaded:
+        pool.shutdown(wait=True, cancel_futures=False)
+        for worker_task in workers:
+            if worker_task._exception != None:
+                print(f"[Error][{current_thread().name}] state {worker_task._state} / exception {worker_task._exception}")
+
+    #################################################################3
+    def thread_worker(self, href_string, url_path, dir_path):
+      if href_string.endswith("/"):  # Directory case
+        crawler_access_path = ""
+        flatten_list = list()
+
+        if self.debug_prints:
+          print(f"[Info][{current_thread().name}] thread_worker {href_string} started")
+
+        # check if we have nested list
+        # if dirs != ():
+        #     self.__flatten__(dirs, flatten_list)
+
+        # Create:
+        # 1. Crawler_access_path - access string to the crawler dictionary
+        # 2. url_path - artifactory_url with the subfolder path
+        # 3. dir_path - local folder path
+        for dir in flatten_list:
+            crawler_access_path += f"['{dir}']"
+            url_path += f"/{dir}"
+            dir_path += f"/{dir}"
+
+        crawler_access = eval(f"self.crawler['{self.artifactory_url}']{crawler_access_path}")
+        directory = href_string[:-1]  # Remove the folder '/' suffix
+        if self.disable_cache or (directory not in crawler_access):
+            if self.debug_prints:
+              print(f"[Info][{current_thread().name}] Adding [{directory}][{current_thread().name}] to crawler")
+            crawler_access[directory] = {
+                "path": url_path,
+                "type": "dir"
+            }
+        flatten_list.append(directory)
+        self.start(flatten_list)
       else:
-          print(f"[Info][{current_thread().name}] File already inside the crawler")
-          print(f"[Info][{current_thread().name}] Checking timestamp")
-          if crawler_access[file]["last-modified"] != last_modified:
-              print(f"[Info][{current_thread().name}] file [{file}] time-stamp changed, re-parsing..")
-              Unpack(crawler_access[file], file_path, dir_path, file, file_type, filter)
-              crawler_access[file]["last-modified"] = last_modified
+          # Crawler found file case
+          print(f"[Info][{current_thread().name}] Found file [{href_string}]")
 
-def run(url, filter, _file, *dirs):
-    global q
-    print(f"[Info][{current_thread().name}] Scanning url [", end="")
-    dir_path = url.rsplit('/', 1)[1]
-    _dirs = list()
-    if dirs != ():
-        flatten(dirs, _dirs)
-    url_path = url
-    crawler_access_path = ""
-    for dir in _dirs:
-        crawler_access_path += f"['{dir}']"
-        url_path += f"/{dir}"
-        dir_path += f"/{dir}"
-    print(f"[{current_thread().name}]{url_path}]")
-    pathlib.Path(dir_path).mkdir(parents=True, exist_ok=True)
-    crawler_access = eval(f"crawler['{url}']{crawler_access_path}")
-    while True:
-        try:
-            result = urllib.request.urlopen(url_path, context=ctx)
-        except:
-            print(f"[Warning][{current_thread().name}] Failed to open {url_path}, Retrying...")
-            # extype, value, tb = sys.exc_info()
-            # traceback.print_exc()
-            # pdb.post_mortem(tb)
-            time.sleep(60)
-        else:
-            break
-    result = urllib.request.urlopen(url_path, context=ctx)
-    soup = BeautifulSoup(result, "lxml")
-    href_items = soup.find_all('a', href=True)
-    pool = ThreadPoolExecutor(max_workers=40) # len(href_items)
-    workers = []
-    for item in href_items:
-        if item.text:
-          workers.append(pool.submit(worker, item, crawler_access, url_path, dirs, dir_path, filter))
+@dataclass
+class Factory(Runner):
 
-    pool.shutdown(wait=True,cancel_futures=False)
-    for worker_task in workers:
-        if worker_task._exception != None:
-            print(f"[Error][{current_thread().name}] state {worker_task._state} / exception {worker_task._exception}")
+    @classmethod
+    def lunarlake_bios_runner(cls):
+      return cls(
+          artifactory_url="https://ubit-artifactory-or.intel.com/artifactory/client-bios-or-local/Daily/LunarLake/lunarlake_family",
+          directory_name_filter=["FSP_Wrapper_X64_VS_Release/", "FSP_Wrapper_X64_VS_Debug/"],
+          file_extentions_filter=[".bin", ".efi", ".rom"],
+          # multi_threaded=False,
+          datetime_filter="01-Oct-2023 16:06"
+      )
 
-if __name__=="__main__":
-    _file = open("crawler.json", "r+")
-    crawler=json.load(_file)
-    with open("crawler.json", "r+") as _file:
-        for url, db in crawler.items():
-            run(url, db["file_info_filter"], _file)
-        _file.seek(0)
-        json.dump(crawler, _file, indent=4)
-        _file.truncate()
+if __name__ == "__main__":
+    crawler = Factory.lunarlake_bios_runner()  # multi_threaded=False
+    crawler.start()
