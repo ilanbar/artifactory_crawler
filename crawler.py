@@ -6,17 +6,16 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, wait
 import ssl
 import time
-from datetime import datetime
 import os
+import re
 
-date_format = "%d-%b-%Y %H:%M"
 
 @dataclass
 class Runner:
     artifactory_url: str
     directory_name_filter: list
     file_extentions_filter: list
-    datetime_filter: str
+    time_filter: str
     output_json_file: str = None
     disable_cache : bool = False
     debug_prints : bool = True
@@ -36,6 +35,10 @@ class Runner:
         self.artifactory_url+="/"
       # Create empty dict entry for the artifactory_url string
       self.crawler[self.artifactory_url] = dict()
+
+      # create time object for the self.time_filter
+      self.date_format = "%d-%b-%Y %H:%M"
+      self.time_filter_obj = time.strptime(self.time_filter, self.date_format)
 
     '''
     The method does recursive scan of artifactoery files and folders
@@ -60,12 +63,9 @@ class Runner:
               result = urllib.request.urlopen(url_path, context=self.ctx)
           except:
               print(f"[Warning][{current_thread().name}] Failed to open {url_path}, Retrying...")
-              time.sleep(60)
+              time.sleep(10)
           else:
               break
-
-      # href_items = set([directory.text for directory in href_items]) & set(self.directory_name_filter)
-      # datetime_object = datetime.strptime(date_string, date_format)
 
       if url_path.endswith('/'):
         # Extract list of HREF items
@@ -87,8 +87,10 @@ class Runner:
                 else:
                     self.start(temp_url_path, folder_path)
               else:
-                  if self.debug_prints:
-                    print(f"[Info][{current_thread().name}] Found file [{href_string}]")
+                  if self.__match_folder_filter__(urljoin(url_path, href_string)) and \
+                    self.__match_date_filter__(href_item.nextSibling.strip()):
+                      if self.debug_prints:
+                        print(f"[Info][{current_thread().name}] Found file [{href_string}]")
 
       # Wait for all threads to complete
       if self.multi_threaded:
@@ -96,6 +98,23 @@ class Runner:
         for worker_task in workers:
             if worker_task._exception != None:
                 print(f"[Error][{current_thread().name}] state {worker_task._state} / exception {worker_task._exception}")
+
+    #################################################################
+    def __match_folder_filter__(self, url):
+      for dirname in self.directory_name_filter:
+          if dirname in url:
+            return True
+      return False
+
+    #################################################################3
+    def __match_date_filter__(self, date_string):
+      m = re.match("(\d{1,}-.*-\d{4} \d{2}:\d{2})", date_string)
+      if m:
+        date_string = m.group(1)
+        time_object = time.strptime(date_string, self.date_format)
+        if time_object >= self.time_filter_obj:
+          return True
+      return False
 
     #################################################################3
     def thread_worker(self, href_string, url_path, dir_path):
@@ -105,19 +124,6 @@ class Runner:
 
         if self.debug_prints:
           print(f"[Info][{current_thread().name}] thread_worker {href_string} started")
-
-        # check if we have nested list
-        # if dirs != ():
-        #     self.__flatten__(dirs, flatten_list)
-
-        # Create:
-        # 1. Crawler_access_path - access string to the crawler dictionary
-        # 2. url_path - artifactory_url with the subfolder path
-        # 3. dir_path - local folder path
-        for dir in flatten_list:
-            crawler_access_path += f"['{dir}']"
-            url_path += f"/{dir}"
-            dir_path += f"/{dir}"
 
         crawler_access = eval(f"self.crawler['{self.artifactory_url}']{crawler_access_path}")
         directory = href_string[:-1]  # Remove the folder '/' suffix
@@ -141,10 +147,10 @@ class Factory(Runner):
     def lunarlake_bios_runner(cls):
       return cls(
           artifactory_url="https://ubit-artifactory-or.intel.com/artifactory/client-bios-or-local/Daily/LunarLake/lunarlake_family",
-          directory_name_filter=["FSP_Wrapper_X64_VS_Release/", "FSP_Wrapper_X64_VS_Debug/"],
+          directory_name_filter=["/FSP_Wrapper_X64_VS_Release/", "/FSP_Wrapper_X64_VS_Debug/"],
           file_extentions_filter=[".bin", ".efi", ".rom"],
           # multi_threaded=False,
-          datetime_filter="01-Oct-2023 16:06"
+          time_filter="01-Oct-2023 16:06"
       )
 
 if __name__ == "__main__":
