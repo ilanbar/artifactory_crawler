@@ -42,14 +42,11 @@ class Runner:
 
     '''
     The method does recursive scan of artifactoery files and folders
-    The The folder_path contains the list of folders after the artifactory_url
     '''
-    def start(self, url_path=None, folder_path=list()):
+    def start(self, url_path=None):
       # First time this function is called we set url_path to artifactory_url
-      # The folder_path contains the list of folders after the artifactory_url
       if url_path == None:
         url_path = self.artifactory_url
-        folder_path = [urlsplit(url_path).path.split("/")[-2]]
 
       if self.multi_threaded:
         workers = list()
@@ -78,14 +75,13 @@ class Runner:
             href_string = href_item.attrs['href']
             if href_string and href_string != "../": # with skip parent folder ..
               if href_string.endswith('/'):
-                folder_path.append(href_string)
                 if self.debug_prints:
                   print(f"[Info][{current_thread().name}] Adding [{href_string}][{current_thread().name}] to crawler")
                 temp_url_path = urljoin(f"{url_path}/", href_string)
                 if self.multi_threaded:
-                    workers.append(pool.submit(self.start, temp_url_path, folder_path))
+                    workers.append(pool.submit(self.start, temp_url_path))
                 else:
-                    self.start(temp_url_path, folder_path)
+                    self.start(temp_url_path)
               else:
                   if self.__match_folder_filter__(urljoin(url_path, href_string)) and \
                     self.__match_date_filter__(href_item.nextSibling.strip()):
@@ -115,31 +111,6 @@ class Runner:
         if time_object >= self.time_filter_obj:
           return True
       return False
-
-    #################################################################3
-    def thread_worker(self, href_string, url_path, dir_path):
-      if href_string.endswith("/"):  # Directory case
-        crawler_access_path = ""
-        flatten_list = list()
-
-        if self.debug_prints:
-          print(f"[Info][{current_thread().name}] thread_worker {href_string} started")
-
-        crawler_access = eval(f"self.crawler['{self.artifactory_url}']{crawler_access_path}")
-        directory = href_string[:-1]  # Remove the folder '/' suffix
-        if self.disable_cache or (directory not in crawler_access):
-            if self.debug_prints:
-              print(f"[Info][{current_thread().name}] Adding [{directory}][{current_thread().name}] to crawler")
-            crawler_access[directory] = {
-                "path": url_path,
-                "type": "dir"
-            }
-        flatten_list.append(directory)
-        self.start(flatten_list)
-      else:
-          # Crawler found file case
-          print(f"[Info][{current_thread().name}] Found file [{href_string}]")
-
 @dataclass
 class Factory(Runner):
 
@@ -149,7 +120,6 @@ class Factory(Runner):
           artifactory_url="https://ubit-artifactory-or.intel.com/artifactory/client-bios-or-local/Daily/LunarLake/lunarlake_family",
           directory_name_filter=["/FSP_Wrapper_X64_VS_Release/", "/FSP_Wrapper_X64_VS_Debug/"],
           file_extentions_filter=[".bin", ".efi", ".rom"],
-          # multi_threaded=False,
           time_filter="01-Oct-2023 16:06"
       )
 
