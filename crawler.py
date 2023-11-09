@@ -3,12 +3,11 @@ from threading import current_thread
 from urllib.parse import urljoin, urlsplit
 from six.moves import urllib
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 import ssl
 import time
 import os
 import re
-
 
 @dataclass
 class Runner:
@@ -78,6 +77,10 @@ class Runner:
                 if self.debug_prints:
                   print(f"[Info][{current_thread().name}] Adding [{href_string}][{current_thread().name}] to crawler")
                 temp_url_path = urljoin(f"{url_path}/", href_string)
+                if not self.__match_date_filter__(href_item.nextSibling.strip()):
+                  if self.debug_prints:
+                    print(f"[Info][{current_thread().name}] Skipping [{href_string}][{current_thread().name}] due to date filter")
+                  continue
                 if self.multi_threaded:
                     workers.append(pool.submit(self.start, temp_url_path))
                 else:
