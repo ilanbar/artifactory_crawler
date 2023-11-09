@@ -53,15 +53,7 @@ class Runner:
       if self.debug_prints:
         print(f"[Info][{current_thread().name}] Scanning url {url_path}")
 
-      # Create direct access into the crawler dictionary
-      while True:
-          try:
-              result = urllib.request.urlopen(url_path, context=self.ctx)
-          except:
-              print(f"[Warning][{current_thread().name}] Failed to open {url_path}, Retrying...")
-              time.sleep(10)
-          else:
-              break
+      result = self.__urlopen__(url_path)
 
       if url_path.endswith('/'):
         # Extract list of HREF items
@@ -91,12 +83,24 @@ class Runner:
                       if self.debug_prints:
                         print(f"[Info][{current_thread().name}] Found file [{href_string}]")
 
+
       # Wait for all threads to complete
       if self.multi_threaded:
         pool.shutdown(wait=True, cancel_futures=False)
         for worker_task in workers:
             if worker_task._exception != None:
                 print(f"[Error][{current_thread().name}] state {worker_task._state} / exception {worker_task._exception}")
+
+    #################################################################
+    def __urlopen__(self, url_path):
+      while True:
+          try:
+              result = urllib.request.urlopen(url_path, context=self.ctx)
+          except:
+              print(f"[Warning][{current_thread().name}] Failed to open {url_path}, Retrying...")
+              time.sleep(1)
+          else:
+              return result
 
     #################################################################
     def __match_folder_filter__(self, url):
@@ -118,7 +122,7 @@ class Runner:
 class Factory(Runner):
 
     @classmethod
-    def lunarlake_bios_runner(cls):
+    def lunarlake_family_runner(cls):
       return cls(
           artifactory_url="https://ubit-artifactory-or.intel.com/artifactory/client-bios-or-local/Daily/LunarLake/lunarlake_family",
           directory_name_filter=["/FSP_Wrapper_X64_VS_Release/", "/FSP_Wrapper_X64_VS_Debug/"],
@@ -127,5 +131,5 @@ class Factory(Runner):
       )
 
 if __name__ == "__main__":
-    crawler = Factory.lunarlake_bios_runner()  # multi_threaded=False
+    crawler = Factory.lunarlake_family_runner()  # multi_threaded=False
     crawler.start()
