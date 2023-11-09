@@ -8,6 +8,7 @@ import ssl
 import time
 import os
 import re
+import subprocess
 
 @dataclass
 class Runner:
@@ -118,6 +119,34 @@ class Runner:
         if time_object >= self.time_filter_obj:
           return True
       return False
+
+
+    def Unpack(crowler_access, file_path, dir_path, file, file_type, filter):
+        print(f"[info] Downloading [{file_path}] ...")
+        local_filename, _ = request.urlretrieve(file_path)
+        print(f"[Info] Local file is [{local_filename}]")
+        if file_type != "std":
+            result = subprocess.run(
+                ["7z", "l", local_filename], capture_output=True,  text=True)
+            file_log = os.path.join(dir_path, file)+".log"
+            with open(file_log, "w") as f:
+                for line in result.stdout.split("\n"):
+                    for ext in filter:
+                        if line.endswith(ext):
+                            f.write(f"{line}\n")
+            if os.path.getsize(file_log) == 0:
+                os.remove(file_log)
+            else:
+                crowler_access["log-path"] = file_log
+
+        else:
+            outfile = os.path.join(dir_path, file)+".stat"
+            with open(outfile, "w") as f:
+                f.write(str(os.stat(local_filename)))
+        print(f"[info] Removing file]")
+        os.remove(local_filename)
+
+
 @dataclass
 class Factory(Runner):
 
