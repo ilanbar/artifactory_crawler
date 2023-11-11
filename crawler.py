@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from threading import current_thread
+from urllib import request
 from urllib.parse import urljoin, urlsplit
-from six.moves import urllib
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 import ssl
@@ -14,7 +14,7 @@ import subprocess
 class Runner:
     artifactory_url: str
     directory_name_filter: list
-    file_extentions_filter: list
+    filter_in_zip_file: list
     time_filter: str
     output_json_file: str = None
     disable_cache : bool = False
@@ -83,6 +83,7 @@ class Runner:
                     self.__match_date_filter__(href_item.nextSibling.strip()):
                       if self.debug_prints:
                         print(f"[Info][{current_thread().name}] Found file [{href_string}]")
+                      self.Unpack(urljoin(url_path, href_string))
 
 
       # Wait for all threads to complete
@@ -96,7 +97,7 @@ class Runner:
     def __urlopen__(self, url_path):
       while True:
           try:
-              result = urllib.request.urlopen(url_path, context=self.ctx)
+              result = request.urlopen(url_path, context=self.ctx)
           except:
               print(f"[Warning][{current_thread().name}] Failed to open {url_path}, Retrying...")
               time.sleep(1)
@@ -110,7 +111,7 @@ class Runner:
             return True
       return False
 
-    #################################################################3
+    ##################################################################
     def __match_date_filter__(self, date_string):
       m = re.match("(\d{1,}-.*-\d{4} \d{2}:\d{2})", date_string)
       if m:
@@ -120,32 +121,24 @@ class Runner:
           return True
       return False
 
+    ##################################################################
+    def Unpack(self, file_path):
+        if self.debug_prints:
+          print(f"[Info][{current_thread().name}] Downloading [{file_path}] ...")
 
-    def Unpack(crowler_access, file_path, dir_path, file, file_type, filter):
-        print(f"[info] Downloading [{file_path}] ...")
         local_filename, _ = request.urlretrieve(file_path)
-        print(f"[Info] Local file is [{local_filename}]")
-        if file_type != "std":
-            result = subprocess.run(
-                ["7z", "l", local_filename], capture_output=True,  text=True)
-            file_log = os.path.join(dir_path, file)+".log"
-            with open(file_log, "w") as f:
-                for line in result.stdout.split("\n"):
-                    for ext in filter:
-                        if line.endswith(ext):
-                            f.write(f"{line}\n")
-            if os.path.getsize(file_log) == 0:
-                os.remove(file_log)
-            else:
-                crowler_access["log-path"] = file_log
-
-        else:
-            outfile = os.path.join(dir_path, file)+".stat"
-            with open(outfile, "w") as f:
-                f.write(str(os.stat(local_filename)))
-        print(f"[info] Removing file]")
-        os.remove(local_filename)
-
+        if self.debug_prints:
+          print(f"[Info][{current_thread().name}] Local file is [{local_filename}]")
+        if any(ext in file_path for ext in (".zip", ".7z")):
+          result  = subprocess.run(["7z", "l", local_filename], capture_output=True,  text=True)
+          ret_list = list()
+          for line in result.stdout.split("\n"):
+              for ext in self.filter_in_zip_file:
+                if line.endswith(ext):
+                    ret_list.append(list(filter(None, line.split(" ")))[-1])
+          os.remove(local_filename)
+        if self.debug_prints and ret_list != list():
+          print(f"[Info][{current_thread().name}] [{file_path}] has these files {ret_list}")
 
 @dataclass
 class Factory(Runner):
@@ -155,8 +148,12 @@ class Factory(Runner):
       return cls(
           artifactory_url="https://ubit-artifactory-or.intel.com/artifactory/client-bios-or-local/Daily/LunarLake/lunarlake_family",
           directory_name_filter=["/FSP_Wrapper_X64_VS_Release/", "/FSP_Wrapper_X64_VS_Debug/"],
-          file_extentions_filter=[".bin", ".efi", ".rom"],
-          time_filter="01-Oct-2023 16:06"
+          filter_in_zip_file=[
+              ".rom",
+              "X64\\LunarLakePlatformDriver.efi", "X64\\MerlinX.efi", "X64\\XmlWriter.efi", "X64\\ValSharedMailbox.efi"
+              ],
+          time_filter="01-Oct-2023 16:06",
+          # multi_threaded=False
       )
 
 if __name__ == "__main__":
