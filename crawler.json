@@ -1,9 +1,0 @@
-{
-    "https://ubit-artifactory-or.intel.com/artifactory/client-bios-or-local/Daily/LunarLake/lunarlake_family/LunarLake_2324_00": {
-        "file_info_filter": [
-            ".bin",
-            ".efi",
-            ".rom"
-        ]
-    }
-}

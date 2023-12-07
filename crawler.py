@@ -4,6 +4,7 @@ from urllib import request
 from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
+import json
 import ssl
 import time
 import os
@@ -22,9 +23,6 @@ class Runner:
     multi_threaded: bool = True
 
     def __post_init__(self) -> None:
-      # Create the output dictionary
-      self.crawler = dict()
-
       # Create SSL context
       self.ctx = ssl.create_default_context()
       self.ctx.check_hostname = False
@@ -33,12 +31,38 @@ class Runner:
       # fix (add '/' suffix) to the artifactory_url if needed
       if not self.artifactory_url.endswith('/'):
         self.artifactory_url+="/"
-      # Create empty dict entry for the artifactory_url string
-      self.crawler[self.artifactory_url] = dict()
+
+      self.__load_dict__()
 
       # create time object for the self.time_filter
       self.date_format = "%d-%b-%Y %H:%M"
       self.time_filter_obj = time.strptime(self.time_filter, self.date_format)
+
+    def __load_dict__(self):
+      # define the output_json_file is needed
+      if self.output_json_file == None:
+        self.output_json_file = self.artifactory_url.split('/')[-2]+".json"
+
+      # create empty json file if not exist
+      if not os.path.isfile(self.output_json_file):
+        with open(self.output_json_file, "w") as fp:
+          json.dump(fp, dict())
+
+      pass
+      # self.crawler = dict()
+
+
+
+      #   if os.path.isfile(self.output_json_file):
+      #     self.json_fp = open(self.output_json_file, "r+")
+      #   else:
+      #     self.json_fp = open(self.output_json_file, "w")
+
+      #   if self.json_fp != None:
+      #     self.crawler = json.load(self.json_fp)
+
+      # # Create empty dict entry for the artifactory_url string
+      # self.crawler[self.artifactory_url] = dict()
 
     '''
     The method does recursive scan of artifactoery files and folders
@@ -88,7 +112,7 @@ class Runner:
 
       # Wait for all threads to complete
       if self.multi_threaded:
-        pool.shutdown(wait=True, cancel_futures=False)
+        pool.shutdown(wait=True) # , cancel_futures=False
         for worker_task in workers:
             if worker_task._exception != None:
                 print(f"[Error][{current_thread().name}] state {worker_task._state} / exception {worker_task._exception}")
@@ -129,17 +153,23 @@ class Runner:
         local_filename, _ = request.urlretrieve(file_path)
         if self.debug_prints:
           print(f"[Info][{current_thread().name}] Local file is [{local_filename}]")
+        file_list = list()
         if any(ext in file_path for ext in (".zip", ".7z")):
           result  = subprocess.run(["7z", "l", local_filename], capture_output=True,  text=True)
-          ret_list = list()
           for line in result.stdout.split("\n"):
               for ext in self.filter_in_zip_file:
                 if line.endswith(ext):
-                    ret_list.append(list(filter(None, line.split(" ")))[-1])
+                    file_list.append(list(filter(None, line.split(" ")))[-1])
           os.remove(local_filename)
-        if self.debug_prints and ret_list != list():
-          print(f"[Info][{current_thread().name}] [{file_path}] has these files {ret_list}")
-
+        else:
+          # Non compressed files
+          file_list.append(file_path)
+        if self.debug_prints and file_list != list():
+          print(f"[Info][{current_thread().name}] [{file_path}] has these files {file_list}")
+        if file_list != list():
+          for item in file_path.split(self.artifactory_url)[1].split('/'):
+            print(item)
+        #crawler
 @dataclass
 class Factory(Runner):
 
@@ -149,7 +179,7 @@ class Factory(Runner):
           artifactory_url="https://ubit-artifactory-or.intel.com/artifactory/client-bios-or-local/Daily/LunarLake/lunarlake_family",
           directory_name_filter=["/FSP_Wrapper_X64_VS_Release/", "/FSP_Wrapper_X64_VS_Debug/"],
           filter_in_zip_file=[
-              ".rom",
+              ".rom", "Simics.bin",
               "X64\\LunarLakePlatformDriver.efi", "X64\\MerlinX.efi", "X64\\XmlWriter.efi", "X64\\ValSharedMailbox.efi"
               ],
           time_filter="01-Oct-2023 16:06",
@@ -157,5 +187,5 @@ class Factory(Runner):
       )
 
 if __name__ == "__main__":
-    crawler = Factory.lunarlake_family_runner()  # multi_threaded=False
+    crawler = Factory.lunarlake_family_runner()
     crawler.start()
